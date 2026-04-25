@@ -1,16 +1,3 @@
-diff --git a/Makefile b/Makefile
-index 36d0a32fbe49..edd04bdf3a39 100644
---- a/Makefile
-+++ b/Makefile
-@@ -1,7 +1,7 @@
- # SPDX-License-Identifier: GPL-2.0
- VERSION = 7
- PATCHLEVEL = 0
--SUBLEVEL = 0
-+SUBLEVEL = 1
- EXTRAVERSION =
- NAME = Baby Opossum Posse
- 
 diff --git a/arch/x86/Kconfig b/arch/x86/Kconfig
 index e2df1b147184..34b25905fca4 100644
 --- a/arch/x86/Kconfig
@@ -1046,14 +1033,14 @@ index bccc7a4bdd79..ee8e93b79e9f 100644
  	next_fn = PCI_ARI_CAP_NFN(cap);
 diff --git a/drivers/ps5/Makefile b/drivers/ps5/Makefile
 new file mode 100644
-index 000000000000..b70ff1467446
+index 000000000000..7acb030a4976
 --- /dev/null
 +++ b/drivers/ps5/Makefile
 @@ -0,0 +1 @@
-+obj-y += spcie.o tpcie.o hdmi.o
++obj-y += spcie.o tpcie.o hdmi.o mp1.o
 diff --git a/drivers/ps5/hdmi.c b/drivers/ps5/hdmi.c
 new file mode 100644
-index 000000000000..2f897b7e21e2
+index 000000000000..20e5f3648168
 --- /dev/null
 +++ b/drivers/ps5/hdmi.c
 @@ -0,0 +1,1022 @@
@@ -1063,8 +1050,8 @@ index 000000000000..2f897b7e21e2
 +#include <linux/ps5.h>
 +#include <drm/drm_edid.h>
 +
-+#define HDMI_IC_TYPE_FLAVA3 2
-+#define HDMI_IC_TYPE_VERDE 3
++#define HDMI_IC_TYPE_FLAVA3	2
++#define HDMI_IC_TYPE_VERDE	3
 +
 +struct icc_i2c_msg {
 +	u8 code;
@@ -2079,12 +2066,346 @@ index 000000000000..2f897b7e21e2
 +		}
 +}
 +EXPORT_SYMBOL(hdmi_notification_handler);
+diff --git a/drivers/ps5/mp1.c b/drivers/ps5/mp1.c
+new file mode 100644
+index 000000000000..ef5c9dcb43ef
+--- /dev/null
++++ b/drivers/ps5/mp1.c
+@@ -0,0 +1,328 @@
++#define pr_fmt(fmt) KBUILD_MODNAME ": " fmt
++
++#include <linux/module.h>
++#include <linux/miscdevice.h>
++#include <linux/delay.h>
++#include <linux/smp.h>
++#include <asm/amd/node.h>
++
++#define MP1_IOC_MAGIC		'M'
++
++#define MP1_BOOST_ENTER		_IO(MP1_IOC_MAGIC, 1)
++#define MP1_BOOST_EXIT		_IO(MP1_IOC_MAGIC, 2)
++
++#define CPU_MHZ_MIN		3200
++#define CPU_MHZ_MAX		3500
++
++#define GPU_MHZ_MIN		2000
++#define GPU_MHZ_MAX		2230
++
++#define MSR_ACCESS_DIS		BIT_ULL(62)
++
++#define MSR_DPM_CFG		0xC0011074
++#define MSR_DPM_WAC_ACC_INDEX	0xC0011076
++#define MSR_DPM_WAC_DATA	0xC0011077
++
++#define MP1_C2PMSG_56		0x3b109e0
++#define MP1_C2PMSG_57		0x3b109e4
++#define MP1_C2PMSG_58		0x3b109e8
++#define MP1_C2PMSG_59		0x3b109ec
++#define MP1_C2PMSG_66		0x3b10a08
++#define MP1_C2PMSG_81		0x3b10a44
++#define MP1_C2PMSG_82		0x3b10a48
++#define MP1_C2PMSG_90		0x3b10a68
++
++struct mp1_msg {
++	u32 arg;
++	u32 resp;
++	u32 resp_val;
++	u32 extra_arg;
++	u32 extra;
++};
++
++struct bapm_param_set {
++	u64 dpm_wac[21];
++	u32 l3_cacw[80];
++	u32 gfx_cacw[88];
++	u64 gfx_cacw_len;
++	u32 bapm_param[176][2];
++};
++
++static const struct bapm_param_set bapm_param_set_1 = {
++	.dpm_wac = {
++		0x0000bca79c8d0000, 0x0097000000000000, 0x007f0000000000ad,
++		0x00930000c700bb00, 0x000000e0cad5ee00, 0x0000c60099ca00d1,
++		0x00bab80000d8ff00, 0x000000000000a689, 0x0000b59d007300b1,
++		0x0000009600ad0000, 0x00a000b1f8000000, 0x00000000d400b200,
++		0x00a5000000980000, 0x0000969f00b49a00, 0xa48761a100b30000,
++		0x8500869500008f00, 0x7a009700008400a1, 0x00000000a90031ac,
++		0x00b7bd00a10000b5, 0xb000b2c8c3b1a500, 0xa600000000000000
++	},
++	.l3_cacw = {
++		[71] = 0x3ff80000
++	},
++	.gfx_cacw = {
++		[0]  = 0x17, 0x0, 0xa1,
++		[5]  = 0x3f0000,
++		[14] = 0x1c80000,
++		[19] = 0x22, 0x12,
++		[23] = 0x7019d, 0x28001e,
++		[28] = 0x35, 0x15d, 0x1ab, 0x7f0000,
++		[35] = 0xc4,
++		[49] = 0x310000,
++		[54] = 0x76
++	},
++	.gfx_cacw_len = 64,
++	.bapm_param = {
++		{1, 0x3d14a6f2}, {1, 0x00000000}, {1, 0x3ed4eb53}, {1, 0x3e16ae78},
++		{1, 0xbe4d4746}, {1, 0x3f34470b}, {1, 0x37178941}, {1, 0x3f726e59},
++		{1, 0x3f3ebeef}, {1, 0x00000000}, {1, 0x3f8e9ad0}, {1, 0xbc2c0ab6},
++		{1, 0x3d1582c2}, {1, 0x35937309}, {1, 0x3f0f45c5}, {1, 0x3ee17477},
++		{1, 0x00000000}, {1, 0x3f8e9ad0}, {1, 0xbc2c0ab6}, {1, 0x3d1582c2},
++		{1, 0x387ba882}, {1, 0x40b1089a}, {1, 0x41751b15}, {1, 0x4287d1bc},
++		{1, 0x3fb89949}, {1, 0x411eefdf}, {1, 0xbc816b59}, {1, 0x3d41513a},
++		[49] =
++		{1, 0x41751b15}, {1, 0x4287d1bc}, {1, 0x3fb89949}, {1, 0x412d973c},
++		{1, 0xbc816b59}, {1, 0x3d41513a}, {1, 0x3e0654c8}, {1, 0xbe27b465},
++		{1, 0x3f2d3daa}, {1, 0x41751b15}, {1, 0x4287d1bc}, {1, 0x3fb89949},
++		{1, 0x4061d4cc}, {1, 0xbc816b59}, {1, 0x3d41513a}, {1, 0x3e97c980},
++		{1, 0xbf1d9856}, {1, 0x3f828e45}, {1, 0x41751b15}, {1, 0x4287d1bc},
++		{1, 0x3fb89949}, {1, 0x409c4b3c}, {1, 0xbc816b59}, {1, 0x3d41513a},
++		{1, 0x3e7a6107}, {1, 0xbeedd766}, {1, 0x3f67aa70}, {1, 0x41751b15},
++		{1, 0x4287d1bc}, {1, 0x3fb89949}, {1, 0x40ccf558}, {1, 0xbc816b59},
++		{1, 0x3d41513a}, {1, 0x3e600a8a}, {1, 0xbecbe79c}, {1, 0x3f5b627c},
++		{1, 0x41751b15}, {1, 0x4287d1bc}, {1, 0x3fb89949}, {1, 0x41050555},
++		{1, 0xbc816b59}, {1, 0x3d41513a}, {1, 0x3e379205}, {1, 0xbe94367e},
++		{1, 0x3f46233f}, {1, 0x3f726e59}, {1, 0x3f3ebeef}, {1, 0x00000000},
++		{1, 0x3f8e9ad0}, {1, 0xbc2c0ab6}, {1, 0x3d1582c2}, {1, 0x3d14a6f2},
++		{1, 0x00000000}, {1, 0x3ed4eb53}, {1, 0x3f726e59}, {1, 0x3f3ebeef},
++		{1, 0x00000000}, {1, 0x3f8e9ad0}, {1, 0xbc2c0ab6}, {1, 0x3d1582c2},
++		{1, 0x3d14a6f2}, {1, 0x00000000}, {1, 0x3ed4eb53}, {1, 0x3f726e59},
++		{1, 0x3f3ebeef}, {1, 0x00000000}, {1, 0x3f8e9ad0}, {1, 0xbc2c0ab6},
++		{1, 0x3d1582c2}, {1, 0x3d14a6f2}, {1, 0x00000000}, {1, 0x3ed4eb53},
++		{1, 0x3f726e59}, {1, 0x3f3ebeef}, {1, 0x00000000}, {1, 0x3f8e9ad0},
++		{1, 0xbc2c0ab6}, {1, 0x3d1582c2}, {1, 0x3d14a6f2}, {1, 0x00000000},
++		{1, 0x3ed4eb53}, {1, 0x3f726e59}, {1, 0x3f3ebeef}, {1, 0x00000000},
++		{1, 0x3f8e9ad0}, {1, 0xbc2c0ab6}, {1, 0x3d1582c2}, {1, 0x3d14a6f2},
++		{1, 0x00000000}, {1, 0x3ed4eb53}, {1, 0x3f0f45c5}, {1, 0x3ee17477},
++		{1, 0x00000000}, {1, 0x3f8e9ad0}, {1, 0xbc2c0ab6}, {1, 0x3d1582c2},
++		{1, 0x3f0f45c5}, {1, 0x3ee17477}, {1, 0x00000000}, {1, 0x3f8e9ad0},
++		{1, 0xbc2c0ab6}, {1, 0x3d1582c2}, {1, 0x3f0f45c5}, {1, 0x3ee17477},
++		{1, 0x00000000}, {1, 0x3f8e9ad0}, {1, 0xbc2c0ab6}, {1, 0x3d1582c2},
++		{1, 0x3f0f45c5}, {1, 0x3ee17477}, {1, 0x00000000}, {1, 0x3f8e9ad0},
++		{1, 0xbc2c0ab6}, {1, 0x3d1582c2}, {1, 0x3f0f45c5}, {1, 0x3ee17477},
++		{1, 0x00000000}, {1, 0x3f8e9ad0}, {1, 0xbc2c0ab6}, {1, 0x3d1582c2},
++		{1, 0x3c437be5}, {1, 0x00000000}, {1, 0x00000000}, {1, 0x00000000},
++		{1, 0x00000000}, {1, 0x00000000}, {1, 0x00000000}
++	}
++};
++
++static u32 pcirc_smn_read(u32 reg)
++{
++	u32 val = 0;
++	if (amd_smn_read(0, reg, &val)) {
++		panic("amd_smn_read failed");
++	}
++	return val;
++}
++
++static void pcirc_smn_write(u32 reg, u32 val)
++{
++	if (amd_smn_write(0, reg, val)) {
++		panic("amd_smn_write failed");
++	}
++}
++
++static int mp1fw_waitmsg(u32 reg, u8 msgid)
++{
++        int timeout = 0;
++
++        while (!pcirc_smn_read(reg)) {
++                udelay(10);
++                if (++timeout == 200000) {
++                        return 1;
++                }
++        }
++
++        if (timeout >= 10000) {
++                pr_err("[MP1] wait %d msec (msgid=0x%X)\n", timeout / 100, msgid);
++                return 0;
++        }
++
++        return 0;
++}
++
++static int mp1fw_sendmsg(struct mp1_msg *msg, u8 msgid)
++{
++	if (mp1fw_waitmsg(MP1_C2PMSG_90, msgid)) {
++		pr_err("[MP1ERROR] : %s: Error : busy msgid=0x%X, arg=0x%08X\n", __func__, msgid, msg->arg);
++		return -EBUSY;
++	}
++
++	pcirc_smn_write(MP1_C2PMSG_90, 0);
++	pcirc_smn_write(MP1_C2PMSG_82, msg->arg);
++	if (msg->extra == 1)
++		pcirc_smn_write(MP1_C2PMSG_81, msg->extra_arg);
++	pcirc_smn_write(MP1_C2PMSG_66, msgid);
++
++	if (mp1fw_waitmsg(MP1_C2PMSG_90, msgid)) {
++		pr_err("[MP1ERROR] : %s: Error : retry over msgid=0x%X, arg=0x%08X\n", __func__, msgid, msg->arg);
++		return -EBUSY;
++	}
++
++	u32 resp = pcirc_smn_read(MP1_C2PMSG_90);
++	u32 resp_val = pcirc_smn_read(MP1_C2PMSG_82);
++	if (resp != 1) {
++		pr_err("[MP1ERROR] : %s: invalid response msgid=0x%X, resp=0x%08X\n", __func__, msgid, resp);
++		return -EINVAL;
++	}
++
++	msg->resp = resp;
++	msg->resp_val = resp_val;
++
++	return 0;
++}
++
++static int mp1_universal_mode_enter(u32 *params)
++{
++	struct mp1_msg msg = {};
++
++	pcirc_smn_write(MP1_C2PMSG_56, params[1]);
++	pcirc_smn_write(MP1_C2PMSG_57, params[2]);
++	pcirc_smn_write(MP1_C2PMSG_58, params[3]);
++	pcirc_smn_write(MP1_C2PMSG_59, params[4]);
++
++	msg.arg = params[0];
++	return mp1fw_sendmsg(&msg, 0x22);
++}
++
++static int mp1_universal_mode_exit(void)
++{
++	struct mp1_msg msg = {};
++	return mp1fw_sendmsg(&msg, 0x23);
++}
++
++static int mp1_bapm_set_gfx_cacw(int index, int weight)
++{
++	struct mp1_msg msg = {};
++	msg.arg = index | 0x20000;
++	msg.extra_arg = weight;
++	msg.extra = 1;
++	return mp1fw_sendmsg(&msg, 0x2f);
++}
++
++static int mp1_bapm_set_l3_cacw(int index, int weight)
++{
++	struct mp1_msg msg = {};
++	msg.arg = index | 0x20000;
++	msg.extra_arg = weight;
++	msg.extra = 1;
++	return mp1fw_sendmsg(&msg, 0x30);
++}
++
++static int mp1_bapm_write_param(int index, int param)
++{
++	struct mp1_msg msg = {};
++	msg.arg = index;
++	msg.extra_arg = param;
++	msg.extra = 1;
++	return mp1fw_sendmsg(&msg, 0x33);
++}
++
++static void update_bapm_weights_smp(void *info)
++{
++	u64 msr_dpm_cfg;
++	int i;
++
++	rdmsrq(MSR_DPM_CFG, msr_dpm_cfg);
++	wrmsrq(MSR_DPM_CFG, msr_dpm_cfg & ~MSR_ACCESS_DIS);
++
++	for (i = 0; i < 21; i++) {
++		wrmsrq(MSR_DPM_WAC_ACC_INDEX, i);
++		wrmsrq(MSR_DPM_WAC_DATA, bapm_param_set_1.dpm_wac[i]);
++	}
++
++	wrmsrq(MSR_DPM_CFG, msr_dpm_cfg);
++}
++
++static void mp1_set_bapm_param_set_all(void)
++{
++	int i;
++
++	on_each_cpu(update_bapm_weights_smp, NULL, 1);
++
++	for (i = 0; i < 80; i++) {
++		mp1_bapm_set_l3_cacw(i, bapm_param_set_1.l3_cacw[i]);
++	}
++
++	for (i = 0; i < bapm_param_set_1.gfx_cacw_len; i++) {
++		mp1_bapm_set_gfx_cacw(i, bapm_param_set_1.gfx_cacw[i]);
++	}
++
++	for (i = 0; i < 176; i++) {
++		if (bapm_param_set_1.bapm_param[i][0])
++			mp1_bapm_write_param(i, bapm_param_set_1.bapm_param[i][1]);
++	}
++}
++
++static long mp1_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
++{
++	switch (cmd) {
++	case MP1_BOOST_ENTER:
++	{
++		u32 params[5];
++		params[0] = 0x0;
++		params[1] = 0x449cd;
++		params[2] = (GPU_MHZ_MIN << 16) | CPU_MHZ_MIN;
++		params[3] = (GPU_MHZ_MAX << 16) | CPU_MHZ_MAX;
++		params[4] = 0x25c6a3c8;
++		return mp1_universal_mode_enter(params);
++	}
++
++	case MP1_BOOST_EXIT:
++		return mp1_universal_mode_exit();
++
++	default:
++		return -ENOTTY;
++	}
++}
++
++static const struct file_operations mp1_fops = {
++	.owner = THIS_MODULE,
++	.unlocked_ioctl = mp1_ioctl,
++};
++
++static struct miscdevice mp1_misc_device = {
++	.minor = MISC_DYNAMIC_MINOR,
++	.name = "mp1",
++	.fops = &mp1_fops,
++};
++
++static int __init mp1_init(void)
++{
++	int ret;
++
++	mp1_universal_mode_exit();
++
++	pr_info("Set BAPM params\n");
++	mp1_set_bapm_param_set_all();
++
++	ret = misc_register(&mp1_misc_device);
++	if (ret)
++		return ret;
++
++	return 0;
++}
++
++static void __exit mp1_exit(void)
++{
++	misc_deregister(&mp1_misc_device);
++	mp1_universal_mode_exit();
++}
++
++module_init(mp1_init);
++module_exit(mp1_exit);
++
++MODULE_AUTHOR("Andy Nguyen");
++MODULE_DESCRIPTION("PlayStation 5 MP1 SMU driver");
++MODULE_LICENSE("GPL");
 diff --git a/drivers/ps5/spcie.c b/drivers/ps5/spcie.c
 new file mode 100644
-index 000000000000..fd0eec9e80c4
+index 000000000000..9e1b790465f8
 --- /dev/null
 +++ b/drivers/ps5/spcie.c
-@@ -0,0 +1,564 @@
+@@ -0,0 +1,562 @@
 +#define pr_fmt(fmt) KBUILD_MODNAME ": " fmt
 +
 +#include <linux/module.h>
@@ -2503,8 +2824,6 @@ index 000000000000..fd0eec9e80c4
 +		u8 pattern;
 +		if (copy_from_user(&pattern, (u8 __user *)arg, sizeof(u8)))
 +			return -EFAULT;
-+
-+		pr_info("Setting fan pattern to %u\n", pattern);
 +		return icc_fan_change_servo_pattern(pattern);
 +	}
 +
