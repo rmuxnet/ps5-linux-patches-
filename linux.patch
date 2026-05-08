@@ -1143,10 +1143,10 @@ index 000000000000..7acb030a4976
 +obj-y += spcie.o tpcie.o hdmi.o mp1.o
 diff --git a/drivers/ps5/hdmi.c b/drivers/ps5/hdmi.c
 new file mode 100644
-index 000000000000..564eb2581e7a
+index 000000000000..a24459de573a
 --- /dev/null
 +++ b/drivers/ps5/hdmi.c
-@@ -0,0 +1,1073 @@
+@@ -0,0 +1,1237 @@
 +#define pr_fmt(fmt) KBUILD_MODNAME ": " fmt
 +
 +#include <linux/module.h>
@@ -1470,6 +1470,22 @@ index 000000000000..564eb2581e7a
 +	i2c_ctx.msg_hdr->count++;
 +}
 +
++static void i2c_cmd_4_16(void *data, size_t size)
++{
++	struct i2c_cmd_hdr *hdr = (struct i2c_cmd_hdr *)i2c_ctx.msg_cur;
++	hdr->major = 4;
++	hdr->minor = 16;
++	hdr->count = 1;
++	hdr->length = sizeof(*hdr);
++	i2c_ctx.msg_cur += sizeof(*hdr);
++
++	memcpy(i2c_ctx.msg_cur, data, size);
++	i2c_ctx.msg_cur += size;
++	hdr->length += size;
++
++	i2c_ctx.msg_hdr->count++;
++}
++
 +static void i2c_cmd_5_3(u8 unk)
 +{
 +	struct i2c_cmd_hdr *hdr = (struct i2c_cmd_hdr *)i2c_ctx.msg_cur;
@@ -1532,6 +1548,149 @@ index 000000000000..564eb2581e7a
 +
 +	return icc_query(buf, buf);
 +}
++
++static void sceSetBackToUnpluggedSequence(void)
++{
++	static u8 data[] = {0x11, 0x51, 0x09, 0x00, 0x02, 0x09, 0x03, 0x01, 0x01, 0x70, 0x5f, 0x80, 0x80, 0x03, 0x08, 0x01, 0x01, 0x00, 0x32, 0x00, 0x00, 0x02, 0x09, 0x03, 0x01, 0x01, 0x7a, 0x88, 0xff, 0xff, 0x03, 0x08, 0x03, 0x01, 0x00, 0x7a, 0x84, 0x01, 0x02, 0x09, 0x03, 0x01, 0x01, 0x74, 0x0a, 0xff, 0xff, 0x03, 0x08, 0x03, 0x01, 0x00, 0x74, 0x0a, 0xff, 0x02, 0x09, 0x03, 0x01, 0x01, 0x74, 0x19, 0x05, 0x07, 0x02, 0x09, 0x03, 0x01, 0x01, 0x7a, 0x8b, 0x00, 0x07, 0x03, 0x08, 0x01, 0x01, 0x00, 0x32, 0x00, 0x00};
++	i2c_init(0);
++	i2c_cmd_4_16(data, sizeof(data));
++	i2c_exec();
++}
++
++static void sceSetBackToWaitResolutionSequence(void)
++{
++	static u8 data[] = {0x12, 0x47, 0x08, 0x00, 0x02, 0x09, 0x03, 0x01, 0x01, 0x70, 0x5f, 0x80, 0x80, 0x02, 0x08, 0x02, 0x01, 0x01, 0x7a, 0x88, 0xff, 0x03, 0x08, 0x03, 0x01, 0x00, 0x7a, 0x84, 0x01, 0x02, 0x08, 0x02, 0x01, 0x01, 0x74, 0x0a, 0xff, 0x03, 0x08, 0x03, 0x01, 0x00, 0x74, 0x0a, 0xff, 0x02, 0x09, 0x03, 0x01, 0x01, 0x74, 0x19, 0x05, 0x07, 0x02, 0x09, 0x03, 0x01, 0x01, 0x7a, 0x8b, 0x00, 0x07, 0x03, 0x08, 0x01, 0x01, 0x00, 0x64, 0x00, 0x00};
++	i2c_init(0);
++	i2c_cmd_4_16(data, sizeof(data));
++	i2c_exec();
++}
++
++static void i2c_cmd_4_2(void)
++{
++	static u8 data[] = {0x31, 0x7a, 0xb8, 0x08, 0x32, 0x7a, 0xb0, 0x05, 0x33, 0x7a, 0xa0, 0x05, 0x34, 0x7a, 0xe1, 0x01, 0x35, 0x7a, 0xe2, 0x01, 0x36, 0x7a, 0xe0, 0x01, 0x37, 0x7c, 0x00, 0x05};
++
++	i2c_init(0);
++
++	struct i2c_cmd_hdr *hdr = (struct i2c_cmd_hdr *)i2c_ctx.msg_cur;
++	hdr->major = 4;
++	hdr->minor = 2;
++	hdr->count = 7;
++	hdr->length = sizeof(*hdr);
++	i2c_ctx.msg_cur += sizeof(*hdr);
++
++	memcpy(i2c_ctx.msg_cur, data, sizeof(data));
++	i2c_ctx.msg_cur += sizeof(data);
++	hdr->length += sizeof(data);
++
++	i2c_ctx.msg_hdr->count++;
++
++	i2c_exec();
++}
++
++static void sceSetHdcpSequence1st(void)
++{
++	static u8 data[] = {0x0b, 0x91, 0x0f, 0x00, 0x02, 0x0c, 0x02, 0x02, 0x01, 0x7a, 0x8b, 0x05, 0x01, 0x7a, 0x88, 0xff, 0x03, 0x08, 0x03, 0x01, 0x00, 0x7a, 0x84, 0x01, 0x02, 0x11, 0x02, 0x03, 0x02, 0x10, 0xe5, 0xff, 0xff, 0x01, 0x7a, 0x85, 0x00, 0x01, 0x7a, 0x83, 0x84, 0x03, 0x08, 0x02, 0x01, 0x00, 0x7a, 0x84, 0xa0, 0x03, 0x08, 0x03, 0x01, 0x00, 0x7a, 0x84, 0x01, 0x02, 0x08, 0x01, 0x01, 0x01, 0x7a, 0x83, 0x83, 0x03, 0x08, 0x02, 0x01, 0x00, 0x7a, 0x84, 0xa0, 0x03, 0x08, 0x03, 0x01, 0x00, 0x7a, 0x84, 0x01, 0x03, 0x08, 0x01, 0x01, 0x00, 0x0f, 0x00, 0x00, 0x02, 0x08, 0x01, 0x01, 0x01, 0x7a, 0x83, 0x84, 0x03, 0x08, 0x02, 0x01, 0x00, 0x7a, 0x84, 0xa0, 0x03, 0x08, 0x03, 0x01, 0x00, 0x7a, 0x84, 0x01, 0x02, 0x10, 0x02, 0x03, 0x01, 0x10, 0xe6, 0xff, 0x01, 0x7a, 0x85, 0x00, 0x01, 0x7a, 0x83, 0xe3, 0x03, 0x08, 0x02, 0x01, 0x00, 0x7a, 0x84, 0xa0, 0x03, 0x08, 0x03, 0x01, 0x00, 0x7a, 0x84, 0x01};
++
++	i2c_init(0);
++	i2c_cmd_4_16(data, sizeof(data));
++	i2c_exec();
++}
++
++static void sceSetHdcpSequence2nd(void)
++{
++	static u8 data[] = {0x0c, 0x39, 0x06, 0x00, 0x02, 0x0d, 0x02, 0x02, 0x02, 0x10, 0xe5, 0xff, 0xff, 0x01, 0x7a, 0x83, 0xdc, 0x03, 0x08, 0x02, 0x01, 0x00, 0x7a, 0x84, 0xa0, 0x03, 0x08, 0x03, 0x01, 0x00, 0x7a, 0x84, 0x01, 0x02, 0x08, 0x01, 0x01, 0x01, 0x7a, 0x83, 0xc4, 0x03, 0x08, 0x02, 0x01, 0x00, 0x7a, 0x84, 0xa0, 0x03, 0x08, 0x03, 0x01, 0x00, 0x7a, 0x84, 0x01};
++	i2c_init(0);
++	i2c_cmd_4_16(data, sizeof(data));
++	i2c_exec();
++}
++
++static void sceSetHdcpSequence3rd(void)
++{
++	static u8 data[] = {0x0d, 0x21, 0x01, 0x00, 0x02, 0x1d, 0x02, 0x06, 0x01, 0x10, 0xe7, 0xff, 0x01, 0x7a, 0x8b, 0x03, 0x02, 0x10, 0xe5, 0xff, 0xff, 0x01, 0x7a, 0x9d, 0x4f, 0x01, 0x7a, 0x83, 0x8e, 0x01, 0x7e, 0x03, 0x10};
++	i2c_init(0);
++	i2c_cmd_4_16(data, sizeof(data));
++	i2c_exec();
++}
++
++static void sceSetEdidSequence(int sequence)
++{
++	static u8 seq_0[] = {0x04, 0x3f, 0x06, 0x00, 0x02, 0x0c, 0x02, 0x02, 0x01, 0x7a, 0x88, 0xff, 0x01, 0x7a, 0x83, 0x88, 0x03, 0x08, 0x02, 0x01, 0x00, 0x7a, 0x84, 0xa0, 0x03, 0x08, 0x03, 0x01, 0x00, 0x7a, 0x84, 0x01, 0x02, 0x0f, 0x02, 0x02, 0x01, 0x7a, 0x9c, 0x0e, 0x04, 0x7a, 0x80, 0x00, 0x00, 0x7f, 0x82, 0x03, 0x08, 0x02, 0x01, 0x00, 0x7a, 0x84, 0xa0, 0x03, 0x08, 0x03, 0x01, 0x00, 0x7a, 0x84, 0x01};
++
++	static u8 seq_1[] = {0x05, 0x3f, 0x06, 0x00, 0x02, 0x0c, 0x02, 0x02, 0x01, 0x7a, 0x88, 0xff, 0x01, 0x7a, 0x83, 0x88, 0x03, 0x08, 0x02, 0x01, 0x00, 0x7a, 0x84, 0xa0, 0x03, 0x08, 0x03, 0x01, 0x00, 0x7a, 0x84, 0x01, 0x02, 0x0f, 0x02, 0x02, 0x01, 0x7a, 0x9c, 0x0e, 0x04, 0x7a, 0x80, 0x00, 0x80, 0x7f, 0x82, 0x03, 0x08, 0x02, 0x01, 0x00, 0x7a, 0x84, 0xa0, 0x03, 0x08, 0x03, 0x01, 0x00, 0x7a, 0x84, 0x01};
++
++	static u8 seq_2[] = {0x06, 0x3f, 0x06, 0x00, 0x02, 0x0c, 0x02, 0x02, 0x01, 0x7a, 0x88, 0xff, 0x01, 0x7a, 0x83, 0x88, 0x03, 0x08, 0x02, 0x01, 0x00, 0x7a, 0x84, 0xa0, 0x03, 0x08, 0x03, 0x01, 0x00, 0x7a, 0x84, 0x01, 0x02, 0x0f, 0x02, 0x02, 0x01, 0x7a, 0x9c, 0x0e, 0x04, 0x7a, 0x80, 0x01, 0x00, 0x7f, 0x82, 0x03, 0x08, 0x02, 0x01, 0x00, 0x7a, 0x84, 0xa0, 0x03, 0x08, 0x03, 0x01, 0x00, 0x7a, 0x84, 0x01};
++
++	static u8 seq_3[] = {0x07, 0x3f, 0x06, 0x00, 0x02, 0x0c, 0x02, 0x02, 0x01, 0x7a, 0x88, 0xff, 0x01, 0x7a, 0x83, 0x88, 0x03, 0x08, 0x02, 0x01, 0x00, 0x7a, 0x84, 0xa0, 0x03, 0x08, 0x03, 0x01, 0x00, 0x7a, 0x84, 0x01, 0x02, 0x0f, 0x02, 0x02, 0x01, 0x7a, 0x9c, 0x0e, 0x04, 0x7a, 0x80, 0x01, 0x80, 0x7f, 0x82, 0x03, 0x08, 0x02, 0x01, 0x00, 0x7a, 0x84, 0xa0, 0x03, 0x08, 0x03, 0x01, 0x00, 0x7a, 0x84, 0x01};
++
++	i2c_init(0);
++	if (sequence == 0) {
++		i2c_cmd_4_16(seq_0, sizeof(seq_0));
++	} else if (sequence == 1) {
++		i2c_cmd_4_16(seq_1, sizeof(seq_1));
++	} else if (sequence == 2) {
++		i2c_cmd_4_16(seq_2, sizeof(seq_2));
++	} else if (sequence == 3) {
++		i2c_cmd_4_16(seq_3, sizeof(seq_3));
++	}
++	i2c_exec();
++}
++
++static void sceSetWaitPllSequence(void)
++{
++	static u8 data[] = {0x0a, 0x15, 0x02, 0x00, 0x02, 0x09, 0x03, 0x01, 0x01, 0x70, 0x21, 0xff, 0xff, 0x03, 0x08, 0x01, 0x01, 0x00, 0x64, 0x00, 0x00};
++	i2c_init(0);
++	i2c_cmd_4_16(data, sizeof(data));
++	i2c_exec();
++}
++
++static void unk_akv(void)
++{
++	i2c_init(4);
++	i2c_begin_block();
++	i2c_write(0x7006, 0x12);
++	i2c_write(0x7a88, 0xff);
++	i2c_end_block();
++	i2c_waitclear(0x7a84, 0x01);
++	i2c_cmd_2_1(0x7a83, 0x88);
++	i2c_waitset(0x7a84, 0xa0);
++	i2c_waitclear(0x7a84, 0x01);
++	i2c_begin_block();
++	i2c_write(0x7a8b, 0x05);
++	i2c_write(0x7a89, 0x01);
++	i2c_end_block();
++	i2c_delay(20);
++	i2c_cmd_2_1(0x7a83, 0x0e);
++	i2c_waitset(0x7a84, 0xa0);
++	i2c_exec();
++}
++
++static void sceControlHdmiEvent(u8 enable)
++{
++	i2c_init(4);
++	i2c_cmd_5_4(enable);
++	i2c_exec();
++	hdmi_is_enabled = !!enable;
++}
++
++void hdmiSystemResume(void)
++{
++	// sceSetBackToUnpluggedSequence();
++	// sceSetBackToWaitResolutionSequence();
++	if (hdmi_ic_type == HDMI_IC_TYPE_FLAVA3) {
++		// i2c_cmd_4_2();
++		// sceSetHdcpSequence1st();
++		// sceSetHdcpSequence2nd();
++		// sceSetHdcpSequence3rd();
++		// sceSetEdidSequence(0);
++		// sceSetEdidSequence(1);
++		// sceSetEdidSequence(2);
++		// sceSetEdidSequence(3);
++		// sceSetWaitPllSequence();
++		// unk_akv();
++		sceControlHdmiEvent(1);
++	}
++}
++EXPORT_SYMBOL(hdmiSystemResume);
 +
 +static void sceDisableEncode(void)
 +{
@@ -1606,6 +1765,19 @@ index 000000000000..564eb2581e7a
 +	i2c_write(0x6005, 0x01);
 +	i2c_delay(2);
 +	i2c_write(0x6008, 0x00);
++	i2c_exec();
++}
++
++static void configVSyncSettingFlava3(void)
++{
++	i2c_init(1);
++	i2c_begin_block();
++	i2c_write(0x1047, 0x00);
++	i2c_write(0x6064, 0x01);
++	i2c_write_data(0x600c, (u8[]){0x01, 0x00}, 2);
++	i2c_write(0x6c07, 0x00);
++	i2c_write_data(0x7214, (u8[]){0x00, 0x00}, 2);
++	i2c_end_block();
 +	i2c_exec();
 +}
 +
@@ -2078,6 +2250,7 @@ index 000000000000..564eb2581e7a
 +		sceDisableEncode();
 +		initIsrForFlava3();
 +		initDpForFlava3();
++		configVSyncSettingFlava3();
 +	} else {
 +		initVerde();
 +	}
@@ -2127,15 +2300,6 @@ index 000000000000..564eb2581e7a
 +	i2c_exec();
 +}
 +EXPORT_SYMBOL(sceHdmiSetAudioMute);
-+
-+void sceControlHdmiEvent(u8 enable)
-+{
-+	i2c_init(4);
-+	i2c_cmd_5_4(enable);
-+	i2c_exec();
-+	hdmi_is_enabled = !!enable;
-+}
-+EXPORT_SYMBOL(sceControlHdmiEvent);
 +
 +int isHdmiEnabled(void)
 +{
@@ -2222,16 +2386,17 @@ index 000000000000..564eb2581e7a
 +EXPORT_SYMBOL(hdmi_notification_handler);
 diff --git a/drivers/ps5/mp1.c b/drivers/ps5/mp1.c
 new file mode 100644
-index 000000000000..ef5c9dcb43ef
+index 000000000000..73bb7ca5d1d9
 --- /dev/null
 +++ b/drivers/ps5/mp1.c
-@@ -0,0 +1,328 @@
+@@ -0,0 +1,366 @@
 +#define pr_fmt(fmt) KBUILD_MODNAME ": " fmt
 +
 +#include <linux/module.h>
 +#include <linux/miscdevice.h>
 +#include <linux/delay.h>
 +#include <linux/smp.h>
++#include <linux/ps5.h>
 +#include <asm/amd/node.h>
 +
 +#define MP1_IOC_MAGIC		'M'
@@ -2259,6 +2424,14 @@ index 000000000000..ef5c9dcb43ef
 +#define MP1_C2PMSG_81		0x3b10a44
 +#define MP1_C2PMSG_82		0x3b10a48
 +#define MP1_C2PMSG_90		0x3b10a68
++
++#define PPSMC_MSG_ConfigureS3PwrOffRegisterAddressHigh	0x16
++#define PPSMC_MSG_ConfigureS3PwrOffRegisterAddressLow	0x17
++#define PPSMC_MSG_UniversalModeEntry			0x22
++#define PPSMC_MSG_UniversalModeExit			0x23
++#define PPSMC_MSG_SleepEntry				0x24
++#define PPSMC_MSG_GfxCacWeightOperation			0x2F
++#define PPSMC_MSG_L3CacWeightOperation			0x30
 +
 +struct mp1_msg {
 +	u32 arg;
@@ -2411,6 +2584,35 @@ index 000000000000..ef5c9dcb43ef
 +	return 0;
 +}
 +
++static int mp1_configure_s3_pwr_off_reg_addr_high(u64 addr)
++{
++	struct mp1_msg msg = {};
++	msg.arg = addr >> 32;
++	return mp1fw_sendmsg(&msg, PPSMC_MSG_ConfigureS3PwrOffRegisterAddressHigh);
++}
++
++static int mp1_configure_s3_pwr_off_reg_addr_low(u64 addr)
++{
++	struct mp1_msg msg = {};
++	msg.arg = addr & 0xffffffff;
++	return mp1fw_sendmsg(&msg, PPSMC_MSG_ConfigureS3PwrOffRegisterAddressLow);
++}
++
++void mp1_set_pm1_addr(u64 addr)
++{
++	mp1_configure_s3_pwr_off_reg_addr_high(addr);
++	mp1_configure_s3_pwr_off_reg_addr_low(addr);
++}
++EXPORT_SYMBOL(mp1_set_pm1_addr);
++
++int mp1_set_sleep_entry(void)
++{
++	struct mp1_msg msg = {};
++	msg.arg = 3; /* S3 */
++	return mp1fw_sendmsg(&msg, PPSMC_MSG_SleepEntry);
++}
++EXPORT_SYMBOL(mp1_set_sleep_entry);
++
 +static int mp1_universal_mode_enter(u32 *params)
 +{
 +	struct mp1_msg msg = {};
@@ -2421,13 +2623,13 @@ index 000000000000..ef5c9dcb43ef
 +	pcirc_smn_write(MP1_C2PMSG_59, params[4]);
 +
 +	msg.arg = params[0];
-+	return mp1fw_sendmsg(&msg, 0x22);
++	return mp1fw_sendmsg(&msg, PPSMC_MSG_UniversalModeEntry);
 +}
 +
 +static int mp1_universal_mode_exit(void)
 +{
 +	struct mp1_msg msg = {};
-+	return mp1fw_sendmsg(&msg, 0x23);
++	return mp1fw_sendmsg(&msg, PPSMC_MSG_UniversalModeExit);
 +}
 +
 +static int mp1_bapm_set_gfx_cacw(int index, int weight)
@@ -2436,7 +2638,7 @@ index 000000000000..ef5c9dcb43ef
 +	msg.arg = index | 0x20000;
 +	msg.extra_arg = weight;
 +	msg.extra = 1;
-+	return mp1fw_sendmsg(&msg, 0x2f);
++	return mp1fw_sendmsg(&msg, PPSMC_MSG_GfxCacWeightOperation);
 +}
 +
 +static int mp1_bapm_set_l3_cacw(int index, int weight)
@@ -2445,7 +2647,7 @@ index 000000000000..ef5c9dcb43ef
 +	msg.arg = index | 0x20000;
 +	msg.extra_arg = weight;
 +	msg.extra = 1;
-+	return mp1fw_sendmsg(&msg, 0x30);
++	return mp1fw_sendmsg(&msg, PPSMC_MSG_L3CacWeightOperation);
 +}
 +
 +static int mp1_bapm_write_param(int index, int param)
@@ -2556,10 +2758,10 @@ index 000000000000..ef5c9dcb43ef
 +MODULE_LICENSE("GPL");
 diff --git a/drivers/ps5/spcie.c b/drivers/ps5/spcie.c
 new file mode 100644
-index 000000000000..7f6fcaf9522d
+index 000000000000..eca41996f4a1
 --- /dev/null
 +++ b/drivers/ps5/spcie.c
-@@ -0,0 +1,654 @@
+@@ -0,0 +1,678 @@
 +#define pr_fmt(fmt) KBUILD_MODNAME ": " fmt
 +
 +#include <linux/module.h>
@@ -2810,6 +3012,30 @@ index 000000000000..7f6fcaf9522d
 +	return 0;
 +}
 +EXPORT_SYMBOL(icc_configuration_clear_cpu_info_bit);
++
++__noreturn void icc_power_suspend(int keep)
++{
++	u8 buf[ICC_MSG_MAX_SIZE] = {};
++	struct icc_msg *msg = (struct icc_msg *)buf;
++
++	msg->service_id = ICC_SERVICE_ID_POWER;
++	msg->msg_type = 1;
++	msg->length = ICC_MSG_MIN_SIZE;
++	msg->data[0] = 1; // with eap
++	msg->data[1] = 1;
++	msg->data[2] = 1;
++	msg->data[3] = 0;
++	msg->data[4] = 1;
++	*(u16 *)&msg->data[5] = (2 * (keep != 0)) | 0x30;
++	*(u16 *)&msg->data[7] = 0;
++
++	icc_query(buf, buf);
++	local_irq_disable();
++	wbinvd();
++	mp1_set_sleep_entry();
++	while (1);
++}
++EXPORT_SYMBOL(icc_power_suspend);
 +
 +__noreturn void icc_power_shutdown(void)
 +{
@@ -3131,7 +3357,7 @@ index 000000000000..7f6fcaf9522d
 +
 +	/* Initialize HDMI */
 +	getHdmiConfiguration();
-+	sceControlHdmiEvent(1);
++	hdmiSystemResume();
 +	sceHdmiInitVideoConfig();
 +
 +	ret = misc_register(&icc_misc_device);
@@ -3530,10 +3756,10 @@ index 927f8a8b7a1d..474f1207e2f3 100644
  extern void dmi_setup(void);
 diff --git a/include/linux/ps5.h b/include/linux/ps5.h
 new file mode 100644
-index 000000000000..f1bd03bacd91
+index 000000000000..cbbab4044922
 --- /dev/null
 +++ b/include/linux/ps5.h
-@@ -0,0 +1,76 @@
+@@ -0,0 +1,80 @@
 +#ifndef _LINUX_PS5_H
 +#define _LINUX_PS5_H
 +
@@ -3578,7 +3804,7 @@ index 000000000000..f1bd03bacd91
 +
 +int icc_query(u8 *query, u8 *reply);
 +
-+void sceControlHdmiEvent(u8 enable);
++void hdmiSystemResume(void);
 +void sceHdmiInitVideoConfig(void);
 +void sceHdmiSetVideoConfig(const struct drm_display_mode *mode);
 +void sceHdmiSetAudioConfig(int channels);
@@ -3595,6 +3821,7 @@ index 000000000000..f1bd03bacd91
 +int icc_configuration_set_cpu_info_bit(u8 *bit);
 +int icc_configuration_clear_cpu_info_bit(void);
 +
++__noreturn void icc_power_suspend(int keep);
 +void __noreturn icc_power_shutdown(void);
 +void __noreturn icc_power_reboot(void);
 +
@@ -3608,6 +3835,9 @@ index 000000000000..f1bd03bacd91
 +int icc_fan_change_servo_pattern(u8 pattern);
 +
 +void hdmi_notification_handler(struct icc_msg *msg);
++
++void mp1_set_pm1_addr(u64 addr);
++int mp1_set_sleep_entry(void);
 +
 +#endif /* _LINUX_PS5_H */
 diff --git a/scripts/setlocalversion b/scripts/setlocalversion
