@@ -1,0 +1,19 @@
+name: deploy
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+  pull_request_target:
+    types: [labeled]
+    branches: [main]
+
+jobs:
+  kernel:
+    if: github.event.label.name == 'run-ci' || github.event_name != 'pull_request_target'
+    permissions:
+      contents: write
+    uses: ./.github/workflows/build-kernel.yml
+    with:
+      patches_ref: ${{ github.event.pull_request.head.sha || github.sha }}
+    secrets: inherit

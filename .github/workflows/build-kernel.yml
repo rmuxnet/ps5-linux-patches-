@@ -1,0 +1,93 @@
+name: Build Kernel
+run-name: Build Kernel
+
+on:
+  workflow_dispatch:
+    inputs:
+      format:
+        description: 'Package format'
+        default: 'all'
+        type: choice
+        options: [deb, arch, all]
+      patches_ref:
+        description: 'Patches branch/tag/SHA (empty = default)'
+        default: ''
+        type: string
+  workflow_call:
+    inputs:
+      patches_ref:
+        type: string
+        default: ''
+jobs:
+  build:
+    runs-on: self-hosted
+    timeout-minutes: 120
+    permissions:
+      contents: write
+
+    env:
+      CCACHE_DIR: /home/opc/ccache
+
+    steps:
+      - name: Checkout image builder
+        uses: actions/checkout@v6
+        with:
+          repository: ps5-linux/ps5-linux-image
+          path: image
+          ref: main
+
+      - name: Build kernel
+        run: |
+          FORMAT="${{ inputs.format || github.event.client_payload.format || 'all' }}"
+          PATCHES_REF="${{ inputs.patches_ref || '' }}"
+          bash image/build_image.sh --kernel-only \
+            --distro "$FORMAT" \
+            --patches-ref "$PATCHES_REF"
+
+      - name: Read kernel and patches version
+        id: version
+        run: |
+          psha=$(git -C image/work/ps5-linux-patches rev-parse --short HEAD)
+          kver=$(cat image/linux-bin/VERSION)
+          ts=$(date -u +%Y%m%d-%H%M%S)
+          echo "kver=$kver" >> "$GITHUB_OUTPUT"
+          echo "psha=$psha" >> "$GITHUB_OUTPUT"
+          echo "ts=$ts" >> "$GITHUB_OUTPUT"
+
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v6
+        with:
+          name: kernel-${{ steps.version.outputs.kver }}-${{ steps.version.outputs.psha }}
+          path: |
+            image/linux-bin/*.deb
+            image/linux-bin/*.pkg.tar.zst
+          retention-days: 7
+
+      - name: Compute checksums
+        id: sha
+        run: |
+          {
+            echo 'sums<<SHAEOF'
+            sha256sum image/linux-bin/*.deb image/linux-bin/*.pkg.tar.zst | sed 's|image/linux-bin/||'
+            echo 'SHAEOF'
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Create or update release
+        if: github.event_name != 'pull_request' && github.event_name != 'pull_request_target'
+        uses: softprops/action-gh-release@v3
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          tag_name: kernel-${{ steps.version.outputs.kver }}-${{ steps.version.outputs.psha }}
+          name: Kernel ${{ steps.version.outputs.kver }} (${{ steps.version.outputs.psha }})
+          body: |
+            PS5 Linux kernel packages for **${{ steps.version.outputs.kver }}**.
+
+            Patches: [`${{ steps.version.outputs.psha }}`](https://github.com/ps5-linux/ps5-linux-patches/commit/${{ steps.version.outputs.psha }})
+
+            ```
+            ${{ steps.sha.outputs.sums }}
+            ```
+          files: |
+            image/linux-bin/*.deb
+            image/linux-bin/*.pkg.tar.zst
+          make_latest: true
